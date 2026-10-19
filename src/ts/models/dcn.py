@@ -1,4 +1,6 @@
 """DCN-v2 reranker: 3 cross layers + deep [128, 64], trained on retriever candidates."""
+from typing import Optional
+
 import numpy as np
 import pandas as pd
 import torch
@@ -80,10 +82,12 @@ def _build_features(
         log_pop = np.log1p(pop)
         is_novel = 0.0 if item in user_items else 1.0
 
-        if last_ts > 0:
-            days_since = (last_ts - user_train["timestamp"].min()) / 86400.0
+        item_rows = user_train[user_train["item_id"] == item]
+        if len(item_rows) > 0:
+            item_last_ts = item_rows["timestamp"].max()
+            days_since = (last_ts - item_last_ts) / 86400.0
         else:
-            days_since = 0.0
+            days_since = 999.0  # user never rated this item
 
         if genre_matrix is not None and item < len(genre_matrix) and len(user_genre):
             item_genre = genre_matrix[item]
@@ -191,7 +195,7 @@ class DCNReranker:
         pos_weight = torch.tensor([(y == 0).sum() / max((y == 1).sum(), 1)], dtype=torch.float32)
 
         optimizer = torch.optim.AdamW(self.model.parameters(), lr=lr, weight_decay=1e-5)
-        criterion = nn.BCELoss(reduction="mean")
+        criterion = nn.BCELoss(reduction="none")
 
         X_t = torch.tensor(X, dtype=torch.float32)
         y_t = torch.tensor(y, dtype=torch.float32)
@@ -292,5 +296,3 @@ class DCNReranker:
         return results
 
 
-# Fix missing Optional import
-from typing import Optional

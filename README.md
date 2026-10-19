@@ -35,6 +35,12 @@ Strict time-based split — no leakage:
 
 Positive label: rating ≥ 4.
 
+## Known limitations
+
+**Attention strategy evaluation** — the attention history strategy (`AttentionUserTower`) requires a candidate item embedding at inference time. The history ablation evaluates it with mean pooling (no `candidate_emb`) as a proxy, which explains its low NDCG@10 (0.037 vs 0.154 for `last_10`). The correct evaluation is per-candidate: encode user with attention attending over history for each candidate separately, then rank. This is a reranking-stage operation and should be measured after the retrieval candidates are generated, not as a standalone retriever.
+
+**DCN val vs test metrics** — DCN-v2 is trained on the validation-period labels (ratings in [p90, p95)). Val metrics (`recall@10=0.233`, `AUC=0.671`) are therefore in-sample. The meaningful held-out numbers are the **test** metrics: `Recall@10=0.227`, `NDCG@10=0.237`, `AUC=0.662`. Use test figures for any external reporting.
+
 ## Serving
 
 ```bash
