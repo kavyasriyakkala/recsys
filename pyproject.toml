@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "two-stage-recsys"
+version = "0.1.0"
+requires-python = ">=3.9"
+dependencies = [
+    "torch>=2.0.0",
+    "numpy",
+    "pandas",
+    "scikit-learn",
+    "fastapi",
+    "uvicorn[standard]",
+    "httpx",
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "httpx",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

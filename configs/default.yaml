@@ -1,0 +1,31 @@
+data:
+  min_ratings: 20
+  positive_threshold: 4
+  smoke_users: 50
+
+retriever:
+  emb_dim: 64
+  history_mode: last_50
+  batch_size: 512
+  lr: 1.0e-3
+  epochs: 10
+  temperature: 0.07
+
+dcn:
+  input_dim: 6
+  n_cross: 3
+  deep_dims: [128, 64]
+  batch_size: 512
+  lr: 1.0e-3
+  epochs: 10
+  n_neg_per_pos: 4
+
+history_study:
+  strategies: [last_10, last_50, all, attention]
+  seeds: [42, 123, 456]
+  epochs: 5
+
+serving:
+  n_benchmark_requests: 100
+  top_k_retrieve: 100
+  top_k_rerank: 10
