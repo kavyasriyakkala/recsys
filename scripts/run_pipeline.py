@@ -24,6 +24,53 @@ from ts.eval.history_study import run_history_study
 from ts.serve.benchmark import run_inline_benchmark
 
 
+def _popularity_within_candidates(candidates, eval_df, item_popularity, k=10):
+    """
+    Rank each user's retrieved candidates by popularity.
+    Uses identical test users, ground-truth positives, and
+    metric implementations as DCN evaluation.
+    """
+    from ts.eval.metrics import recall_at_k, ndcg_at_k
+
+    all_users = [u for u in candidates if u in eval_df["user_id"].values]
+    all_items = sorted({item for cand in candidates.values()
+                        for item in cand["items"]})
+    item_to_col = {item: i for i, item in enumerate(all_items)}
+    n_items = len(all_items)
+
+    scores_mat = np.zeros((len(all_users), n_items), dtype=np.float32)
+    labels_mat = np.zeros((len(all_users), n_items), dtype=np.int32)
+
+    for row, uid in enumerate(all_users):
+        cand = candidates[uid]
+        for item in cand["items"]:
+            if item in item_to_col:
+                scores_mat[row, item_to_col[item]] = float(
+                    item_popularity.get(item, 0)
+                )
+        user_pos = set(
+            eval_df[(eval_df["user_id"] == uid) &
+                    (eval_df["label"] == 1)]["item_id"]
+        )
+        for item in cand["items"]:
+            if item in item_to_col and item in user_pos:
+                labels_mat[row, item_to_col[item]] = 1
+
+    # Only evaluate users who have at least one positive in candidates
+    has_pos = labels_mat.sum(axis=1) > 0
+    if has_pos.sum() == 0:
+        return {"recall@10": 0.0, "ndcg@10": 0.0, "n_users": 0}
+
+    return {
+        "recall@10": recall_at_k(
+            scores_mat[has_pos], labels_mat[has_pos], k),
+        "ndcg@10": ndcg_at_k(
+            scores_mat[has_pos], labels_mat[has_pos], k),
+        "n_users": int(has_pos.sum()),
+        "note": "popularity reranking within retriever candidates only",
+    }
+
+
 def get_git_commit() -> str:
     try:
         return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"],
@@ -110,6 +157,13 @@ def main():
     print(f"  Generating candidates for {len(test_users)} test users...")
     test_candidates = retriever.retrieve(test_users, train_df, k=100)
 
+    pop_within = _popularity_within_candidates(
+        test_candidates, test_df, item_popularity, k=10
+    )
+    print(f"  Popularity within candidates: "
+          f"recall@10={pop_within['recall@10']:.4f} "
+          f"ndcg@10={pop_within['ndcg@10']:.4f}")
+
     print("\n" + "=" * 60)
     print("STEP 5: DCN-v2 reranker")
     print("=" * 60)
@@ -179,6 +233,7 @@ def main():
         },
         "baseline_val": baseline_val,
         "baseline_test": baseline_test,
+        "baseline_within_candidates_test": pop_within,
         "retriever_val": retriever_val,
         "retriever_test": retriever_test,
         "dcn_val": dcn_val,

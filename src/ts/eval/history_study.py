@@ -15,7 +15,11 @@ from ts.models.two_tower import (
 from ts.eval.metrics import ndcg_at_k
 
 
-HISTORY_STRATEGIES = ["last_10", "last_50", "all", "attention"]
+# "attention" excluded from retrieval ablation: target-aware
+# attention requires candidate-specific scoring (one forward
+# pass per user-item pair), incompatible with matmul retrieval.
+# AttentionUserTower class is kept for potential reranking experiments.
+HISTORY_STRATEGIES = ["last_10", "last_50", "all"]
 
 
 def _strategy_max_len(strategy: str) -> int:
