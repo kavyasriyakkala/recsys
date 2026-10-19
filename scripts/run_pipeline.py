@@ -142,12 +142,14 @@ def main():
     print("\n" + "=" * 60)
     print("STEP 7: Serving benchmark (inline)")
     print("=" * 60)
+    from ts.models.dcn import _build_item_first_seen
     state = {
         "retriever": retriever,
         "reranker": reranker,
         "train_df": train_df,
         "item_popularity": item_popularity,
         "genre_matrix": genre_matrix,
+        "item_first_seen": _build_item_first_seen(train_df),
         "feat_mean": reranker.feat_mean,
         "feat_std": reranker.feat_std,
     }

@@ -69,13 +69,16 @@ def run_inline_benchmark(state: dict, k: int = 10, n_requests: int = 100, seed: 
     sample_users = random.choices(users, k=n_requests)
     latencies = []
 
+    item_first_seen = {iid: ts for iid, ts in
+                       train_df.groupby("item_id")["timestamp"].min().items()}
     for uid in sample_users:
         t0 = time.perf_counter()
         candidates = retriever.retrieve([uid], train_df, k=100, exclude_seen=True)
         if reranker is not None:
             cand = candidates[uid]
             feats = _build_features(
-                uid, cand["items"], cand["scores"], train_df, item_popularity, genre_matrix
+                uid, cand["items"], cand["scores"], train_df, item_popularity,
+                genre_matrix, item_first_seen
             )
             _ = reranker.score(feats)
         elapsed_ms = (time.perf_counter() - t0) * 1000

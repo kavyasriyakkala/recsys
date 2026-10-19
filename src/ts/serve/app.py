@@ -74,10 +74,12 @@ def recommend(req: RecommendRequest):
             user_id, candidates, train_df, item_popularity, genre_matrix, k=k
         )
         # scores from DCN
-        from ts.models.dcn import _build_features
+        from ts.models.dcn import _build_features, _build_item_first_seen
+        item_first_seen = _state.get("item_first_seen") or _build_item_first_seen(train_df)
         cand = candidates[user_id]
         feats = _build_features(
-            user_id, cand["items"], cand["scores"], train_df, item_popularity, genre_matrix
+            user_id, cand["items"], cand["scores"], train_df, item_popularity,
+            genre_matrix, item_first_seen
         )
         dcn_scores = reranker.score(feats)
         top_k_idx = np.argsort(-dcn_scores)[:k]

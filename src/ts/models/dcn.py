@@ -13,9 +13,9 @@ from ts.eval.metrics import recall_at_k, ndcg_at_k
 FEATURE_NAMES = [
     "retrieval_score",
     "log_item_popularity",
-    "user_prior_rating_count",
-    "days_since_last_rating",
-    "is_novel",
+    "user_rating_count",
+    "item_age_days",
+    "item_rating_count",
     "genre_match_score",
 ]
 INPUT_DIM = len(FEATURE_NAMES)
@@ -52,6 +52,11 @@ class DCNv2(nn.Module):
         return torch.sigmoid(self.output(torch.cat([xc, xd], dim=-1)))
 
 
+def _build_item_first_seen(train_df: pd.DataFrame) -> dict:
+    """Returns {item_id: first_timestamp} from training data."""
+    return train_df.groupby("item_id")["timestamp"].min().to_dict()
+
+
 def _build_features(
     user_id: int,
     candidate_items: list,
@@ -59,13 +64,11 @@ def _build_features(
     train_df: pd.DataFrame,
     item_popularity: dict,
     genre_matrix: np.ndarray,
+    item_first_seen: dict = None,
 ) -> np.ndarray:
     """Build feature matrix [n_candidates, INPUT_DIM] for one user."""
-    max_pop = max(item_popularity.values()) if item_popularity else 1
-
     user_train = train_df[train_df["user_id"] == user_id]
-    user_items = set(user_train["item_id"])
-    last_ts = user_train["timestamp"].max() if len(user_train) else 0
+    train_max_ts = train_df["timestamp"].max()
     n_prior = len(user_train)
 
     # Genre preference: mean genre vector over positive train items
@@ -76,18 +79,18 @@ def _build_features(
     else:
         user_genre = np.zeros(genre_matrix.shape[1]) if genre_matrix is not None else np.array([])
 
+    # Lazily compute item first-seen if not provided
+    if item_first_seen is None:
+        item_first_seen = _build_item_first_seen(train_df)
+
     feats = []
     for item, score in zip(candidate_items, candidate_scores):
-        pop = item_popularity.get(item, 0)
-        log_pop = np.log1p(pop)
-        is_novel = 0.0 if item in user_items else 1.0
+        item_count = item_popularity.get(item, 0)
+        log_pop = np.log1p(item_count)
 
-        item_rows = user_train[user_train["item_id"] == item]
-        if len(item_rows) > 0:
-            item_last_ts = item_rows["timestamp"].max()
-            days_since = (last_ts - item_last_ts) / 86400.0
-        else:
-            days_since = 999.0  # user never rated this item
+        # Days since item first appeared in training data (item age)
+        first_ts = item_first_seen.get(item, train_max_ts)
+        item_age_days = (train_max_ts - first_ts) / 86400.0
 
         if genre_matrix is not None and item < len(genre_matrix) and len(user_genre):
             item_genre = genre_matrix[item]
@@ -100,12 +103,12 @@ def _build_features(
             genre_match = 0.0
 
         feats.append([
-            float(score),
-            float(log_pop),
-            float(n_prior),
-            float(days_since),
-            float(is_novel),
-            float(genre_match),
+            float(score),       # retrieval_score
+            float(log_pop),     # log_item_popularity (kept for cross-feature interactions)
+            float(n_prior),     # user_rating_count
+            float(item_age_days),  # item_age_days
+            float(item_count),  # item_rating_count (raw, not log)
+            float(genre_match), # genre_match_score
         ])
     return np.array(feats, dtype=np.float32)
 
@@ -135,6 +138,7 @@ class DCNReranker:
         if rng is None:
             rng = np.random.RandomState(42)
 
+        item_first_seen = _build_item_first_seen(train_df)
         all_X, all_y = [], []
         for uid, cand in candidates.items():
             user_eval = eval_df[eval_df["user_id"] == uid]
@@ -160,7 +164,8 @@ class DCNReranker:
             sel_scores = [item_to_score[i] for i in selected]
             labels = [1] * len(pos_items) + [0] * len(selected_neg)
 
-            feats = _build_features(uid, selected, sel_scores, train_df, item_popularity, genre_matrix)
+            feats = _build_features(uid, selected, sel_scores, train_df, item_popularity,
+                                    genre_matrix, item_first_seen)
             all_X.append(feats)
             all_y.extend(labels)
 
@@ -240,8 +245,10 @@ class DCNReranker:
         k: int = 10,
     ) -> list:
         cand = candidates[user_id]
+        item_first_seen = _build_item_first_seen(train_df)
         feats = _build_features(
-            user_id, cand["items"], cand["scores"], train_df, item_popularity, genre_matrix
+            user_id, cand["items"], cand["scores"], train_df, item_popularity,
+            genre_matrix, item_first_seen
         )
         scores = self.score(feats)
         top_k = np.argsort(-scores)[:k]
@@ -256,6 +263,7 @@ class DCNReranker:
         genre_matrix: np.ndarray,
         ks: list = [10],
     ) -> dict:
+        item_first_seen = _build_item_first_seen(train_df)
         all_users = [u for u in candidates if u in eval_df["user_id"].values]
         all_items_sorted = sorted(
             {item for cand in candidates.values() for item in cand["items"]}
@@ -270,7 +278,8 @@ class DCNReranker:
         for row, uid in enumerate(all_users):
             cand = candidates[uid]
             feats = _build_features(
-                uid, cand["items"], cand["scores"], train_df, item_popularity, genre_matrix
+                uid, cand["items"], cand["scores"], train_df, item_popularity,
+                genre_matrix, item_first_seen
             )
             dcn_scores = self.score(feats)
             for col, (item, sc) in enumerate(zip(cand["items"], dcn_scores)):
